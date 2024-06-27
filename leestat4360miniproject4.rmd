@@ -1,0 +1,318 @@
+---
+author: Jake Lee
+title: "STAT4360 Mini Project #4"
+output:
+    pdf_document:
+            latex_engine: xelatex
+---
+
+**Question #1**
+```{r}
+#Set working directory and read the dataset
+setwd("~/Documents/STAT4360/Miniproject_4")
+wine <- read.csv("wine.txt", sep = "\t")
+
+#Call required libraries
+library(caret)
+library(randomForest)
+```
+
+*a)*
+
+```{r}
+ctrl <- trainControl(method = "LOOCV")
+
+model_lin <- train(Quality ~.,
+                 data = wine,
+                 method = "lm",
+                 trControl = ctrl)
+
+print(model_lin$result$RMSE)
+```
+
+*b)*
+
+```{r}
+#Call library and Run
+library("leaps")
+model <- regsubsets(Quality ~., data = wine, nvmax = 6)
+summary(model)
+
+res.sum <- summary(model)
+data.frame(
+  Adj.R2 = which.max(res.sum$adjr2),
+  CP = which.min(res.sum$cp),
+  BIC = which.min(res.sum$bic)
+)
+
+#The best model would be a model with 4 variables according to adjusted R sqr.
+
+#Use LOOCV to compute MSE
+model_best <- train(Quality ~ Clarity + Aroma + Flavor + Oakiness,
+                    data = wine,
+                    method = "lm",
+                    trControl = ctrl)
+
+subset <- print(model_best$results$RMSE)
+```
+
+*c)*
+
+```{r}
+#Use forward stepwise selection
+model_fwd <- regsubsets(Quality ~., data = wine, nvmax = 6, method = "forward")
+summary(model_fwd)
+
+res.sum <- summary(model_fwd)
+data.frame(
+  Adj.R2 = which.max(res.sum$adjr2),
+  CP = which.min(res.sum$cp),
+  BIC = which.min(res.sum$bic)
+)
+
+#Model with 4 variables is the best selection
+ctrl <- trainControl(method = "LOOCV")
+model_best <- train(Quality ~ Clarity + Aroma + Flavor + Oakiness,
+                    data = wine,
+                    method = "lm",
+                    trControl = ctrl)
+
+forward <- print(model_best$results$RMSE)
+```
+
+*d)*
+
+```{r}
+#Use backward stepwise selection
+model_bwd <- regsubsets(Quality ~., data = wine, nvmax = 6, method = "backward")
+summary(model_bwd)
+
+res.sum <- summary(model_bwd)
+data.frame(
+  Adj.R2 = which.max(res.sum$adjr2),
+  CP = which.min(res.sum$cp),
+  BIC = which.min(res.sum$bic)
+)
+
+#Model with 4 variables is the best selection
+ctrl <- trainControl(method = "LOOCV")
+model_best <- train(Quality ~ Clarity + Aroma + Flavor + Oakiness,
+                    data = wine,
+                    method = "lm",
+                    trControl = ctrl)
+
+backward <- print(model_best$results$RMSE)
+```
+
+*e)*
+
+```{r}
+library("glmnet")
+y <- wine$Clarity
+x <- model.matrix(Clarity ~., data = wine)[, -1]
+
+#Set-up grid of lambda values
+grid <- 10 ^ seq(10, -2, length = 100)
+
+#Set-up Ridge Regression
+ridge.mod <- glmnet(x, y, alpha = 0, lambda = grid)
+plot(ridge.mod, xvar = "lambda")
+
+#Check the 50th value on the grid
+dim(coef(ridge.mod))
+ridge.mod$lambda[50]
+coef(ridge.mod)[, 50]
+sqrt(sum(coef(ridge.mod)[-1, 50]^2))
+
+#Check the 1st value on the grid
+ridge.mod$lambda[1]
+coef(ridge.mod)[, 1]
+sqrt(sum(coef(ridge.mod)[-1, 1]^2))
+
+#Compute Test MSE
+set.seed(100)
+train <- sample(1:nrow(x), nrow(x)/2)
+test <- (-train)
+y.test <- y[test]
+
+#Prediction for Test MSE
+ridge.pred <- predict(ridge.mod, s = 4, newx = x[test, ])
+mean((ridge.pred - y.test)^2)
+
+set.seed(1)
+cv.out <- cv.glmnet(x, y, alpha = 0)
+
+plot(cv.out)
+
+#Compute the best value of lambda
+bestlam <- cv.out$lambda.min
+bestlam
+
+ridge.pred <- predict(ridge.mod, s = bestlam, newx = x[test, ])
+
+#Compute test MSE
+mean((ridge.pred - y.test)^2)
+```
+
+*f)*
+
+```{r}
+lasso.mod <- glmnet(x[train, ], y[train], alpha = 1, lambda = grid)
+plot(lasso.mod, xvar = "lambda")
+
+#Check the fits for 70th value of lambda
+lasso.mod$lambda[70]
+coef(lasso.mod)[, 70]
+
+set.seed(111)
+cv.out <- cv.glmnet(x, y, alpha = 1)
+
+plot(cv.out)
+bestlam <- cv.out$lambda.min
+lasso.pred <- predict(lasso.mod, s = bestlam, newx = x[test, ])
+
+mean((lasso.pred - y.test)^2)
+```
+
+*g)*
+
+```{r}
+library("data.table")
+data.table("Linear" = model_lin$result$RMSE, "Best-subset" = subset, "Forward" = forward, "Backward" = backward, "Ridge" = mean((ridge.pred - y.test)^2), "Lasso" = mean((lasso.pred - y.test)^2))
+```
+
+My values for Ridge and Lasso Methods were noticeable as I was getting values that are nowhere close to the original test MSE value when I computed with a general linear model method. Although I've used different methods computing the test MSE values, best-subset and forward and backward methods computed 4 variables for the best model, giving me a model with: $Quality ~ Clarity + Aroma + Flavor + Oakiness$, giving me the same test MSE value of $1.26004$. Lasso and Ridge gave me the least test MSE of $0.005644653$ and $0.006604781$. According to bias-variance tradeoff, smaller test MSE values interprets that the estimation is more accurate than other methods, therefore value-wise, Ridge method would be recommended as it has smaller test MSE.
+
+**Question 2**
+
+*a)*
+```{r}
+library("bestglm")
+
+diabetes <- read.csv("diabetes.csv")
+
+ctrl <- trainControl(method = "cv", number = 10)
+
+diabetes$Outcome <- as.factor(diabetes$Outcome)
+
+model_general <- train(Outcome ~., data = diabetes, method = "glm", trControl = ctrl, family = "binomial")
+
+summary(model_general)
+
+model_general$finalModel
+error_rate <- 1 - model_general$results$Accuracy
+error_rate
+```
+*b)*
+```{r}
+set.seed(1023)
+
+AIC <- length(coef(bestglm(diabetes , IC = "AIC", family = binomial)$BestModel)) - 1
+AIC
+
+model_logsub <- train(Outcome ~ Pregnancies.. + Glucose.. + BloodPressure.. + Insulin.. + BMI.. + DiabetesPedigreeFunction.. + Age.., data = diabetes, method = "glm", trControl = ctrl, family = "binomial")
+
+summary(model_logsub)
+
+logsub <- 1 - model_logsub$results$Accuracy
+logsub
+```
+*c)*
+```{r}
+AIC <- length(coef(bestglm(diabetes , IC = "AIC", family = binomial, method = "forward")$BestModel)) - 1
+AIC
+
+model_logfor <- train(Outcome ~ Pregnancies.. + Glucose.. + BloodPressure.. + Insulin.. + BMI.. + DiabetesPedigreeFunction.. + Age.., data = diabetes, method = "glm", trControl = ctrl, family = "binomial")
+
+summary(model_logfor)
+
+logfor <- 1 - model_logfor$results$Accuracy
+logfor
+
+```
+*d)*
+```{r}
+AIC <- length(coef(bestglm(diabetes , IC = "AIC", family = binomial, method = "backward")$BestModel)) - 1
+AIC
+
+model_logback <- train(Outcome ~ Pregnancies.. + Glucose.. + BloodPressure.. + Insulin.. + BMI.. + DiabetesPedigreeFunction.. + Age.., data = diabetes, method = "glm", trControl = ctrl, family = "binomial")
+
+summary(model_logback)
+
+logback <- 1 - model_logback$results$Accuracy
+logback
+```
+*e)*
+```{r}
+y <- as.numeric(diabetes$Outcome)
+x <- model.matrix(Outcome ~., data = diabetes)[, -1]
+
+#Set-up grid of lambda values
+grid <- 10 ^ seq(10, -2, length = 100)
+
+#Set-up Ridge Regression
+ridge.mod <- glmnet(x, y, alpha = 0, lambda = grid)
+plot(ridge.mod, xvar = "lambda")
+
+#Check the 50th value on the grid
+dim(coef(ridge.mod))
+ridge.mod$lambda[50]
+coef(ridge.mod)[, 50]
+sqrt(sum(coef(ridge.mod)[-1, 50]^2))
+
+#Check the 1st value on the grid
+ridge.mod$lambda[1]
+coef(ridge.mod)[, 1]
+sqrt(sum(coef(ridge.mod)[-1, 1]^2))
+
+#Compute Test MSE
+set.seed(100)
+train <- sample(1:nrow(x), nrow(x)/2)
+test <- (-train)
+y.test <- y[test]
+
+#Prediction for Test MSE
+ridge.pred <- predict(ridge.mod, s = 4, newx = x[test, ])
+mean((ridge.pred - y.test)^2)
+
+set.seed(1)
+cv.out <- cv.glmnet(x, y, alpha = 0)
+
+plot(cv.out)
+
+#Compute the best value of lambda
+bestlam <- cv.out$lambda.min
+bestlam
+
+ridge.pred <- predict(ridge.mod, s = bestlam, newx = x[test, ])
+
+ridgelog <- mean((ridge.pred - y.test)^2)
+ridgelog
+```
+*f)*
+```{r}
+lasso.mod <- glmnet(x[train, ], y[train], alpha = 1, lambda = grid)
+plot(lasso.mod, xvar = "lambda")
+
+#Check the fits for 70th value of lambda
+lasso.mod$lambda[70]
+coef(lasso.mod)[, 70]
+
+set.seed(111)
+cv.out <- cv.glmnet(x, y, alpha = 1)
+
+plot(cv.out)
+bestlam <- cv.out$lambda.min
+lasso.pred <- predict(lasso.mod, s = bestlam, newx = x[test, ])
+
+lassolog <- mean((lasso.pred - y.test)^2)
+lassolog
+```
+
+*g)*
+```{r}
+data.table("Logistic" = error_rate, "Best-subset" = logsub, "Forward" = logfor, "Backward" = logback, "Ridge" = ridgelog, "Lasso" = lassolog)
+
+
+```
+By comparing the error rates of all methods, they all showed similar rates, but Ridge and Lasso methods showed the smallest values for the error rates, meaning that the prediction made with Ridge and Lasso methods are the most accurate. Compared to what I recommended in Project #3, Ridge and Lasso methods are still the most effective prediction methods, as both methods allow to regularise or shrink coefficients of the model, making the model more optimised for prediction.
